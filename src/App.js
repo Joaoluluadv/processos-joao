@@ -339,12 +339,8 @@ const App = () => {
                           </td>
                           <td className="obs-cell">{p.observacoes ? '✓' : '-'}</td>
                           <td className="action">
-                            <button onClick={() => abrirEdicao(p)}>
-                              ✏️ Editar
-                            </button>
-                            <button onClick={() => remover(p.id)} style={{marginLeft: '4px'}}>
-                              Remover
-                            </button>
+                            <button onClick={() => abrirEdicao(p)}>✏️ Editar</button>
+                            <button onClick={() => remover(p.id)}>Remover</button>
                           </td>
                         </tr>
                       );
