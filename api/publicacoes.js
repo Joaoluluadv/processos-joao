@@ -75,11 +75,19 @@ module.exports = async function handler(req, res) {
   }
 
   movimentacoes.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+
+  // Última movimentação de cada processo — o site usa isso na coluna MOVIMENTAÇÃO.
+  const ultimas = {};
+  for (const m of movimentacoes) {
+    if (!ultimas[m.numero]) ultimas[m.numero] = { data: m.data, texto: m.texto, codigo: m.codigo };
+  }
+
   res.status(200).json({
     tribunal,
     consultados: processos.length,
     encontradas: movimentacoes.length,
     falhas,
+    ultimas,
     movimentacoes: movimentacoes.slice(0, 200)
   });
 };
