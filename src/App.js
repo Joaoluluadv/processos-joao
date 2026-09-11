@@ -316,9 +316,9 @@ const App = () => {
                       return (
                         <tr key={p.id}>
                           <td className="numero">{p.numero}</td>
-                          <td 
+                    <td 
                             className="partes-cell"
-                            onClick={() => setEditandoPartes(p.id)}
+                            onClick={() => editandoPartes !== p.id && setEditandoPartes(p.id)}
                             title="Clique para editar"
                           >
                             {editandoPartes === p.id ? (
