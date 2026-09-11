@@ -322,6 +322,7 @@ const App = () => {
                             title="Clique para editar"
                           >
                             {editandoPartes === p.id ? (
+                               {editandoPartes === p.id ? (
                               <input 
                                 autoFocus
                                 value={p.partes}
@@ -331,7 +332,7 @@ const App = () => {
                                 className="edit-input"
                               />
                             ) : (
-                              p.partes
+                              <>📝 {p.partes}</>
                             )}
                           </td>
                           <td className="secondary">{p.classe}</td>
