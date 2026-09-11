@@ -40,13 +40,29 @@ async function consultar(indice, numero) {
   if (!hit) return [];
   const src = hit._source || {};
   const orgao = (src.orgaoJulgador && src.orgaoJulgador.nome) || src.tribunal || '';
-  return (src.movimentos || []).map(m => ({
-    numero,
-    data: dataISO(m.dataHora),
-    texto: m.nome || 'Movimentação',
-    codigo: m.codigo || null,
-    orgao
-  }));
+  return (src.movimentos || []).map(m => {
+    // O DataJud manda o nome padronizado da tabela do CNJ. Os complementos
+    // tabelados trazem o detalhe (tipo de documento, motivo, etc.) — quando
+    // existem, viram o texto completo do movimento.
+    const compl = (m.complementosTabelados || [])
+      .map(c => {
+        const rotulo = (c.descricao || c.nome || '').trim();
+        const valor = (c.valor !== undefined && c.valor !== null ? String(c.valor) : '').trim();
+        if (rotulo && valor && rotulo.toLowerCase() !== valor.toLowerCase()) return rotulo + ': ' + valor;
+        return rotulo || valor;
+      })
+      .filter(Boolean);
+    const base = m.nome || 'Movimentação';
+    return {
+      numero,
+      data: dataISO(m.dataHora),
+      texto: compl.length ? base + ' — ' + compl.join('; ') : base,
+      nome: base,
+      complementos: compl,
+      codigo: m.codigo || null,
+      orgao
+    };
+  });
 }
 
 module.exports = async function handler(req, res) {
