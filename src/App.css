@@ -273,7 +273,18 @@ body {
   color: #1f2937;
   margin-bottom: 1.5rem;
 }
+.modal-box .form-group input,
+.modal-box .form-group select {
+  background: #E0F7FF;
+  border: 2px solid #1E90FF;
+  color: #1f2937;
+}
 
+.modal-box .form-group input:focus,
+.modal-box .form-group select:focus {
+  background: #B0E0FF;
+  border-color: #1E90FF;
+}
 .modal-buttons {
   display: flex;
   gap: 12px;
