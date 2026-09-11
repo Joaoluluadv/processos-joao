@@ -8,7 +8,16 @@ const App = () => {
   const [intimacao, setIntimacao] = useState('');
   const [view, setView] = useState('processos');
   const [sincronizando, setSincronizando] = useState(false);
-  const [editandoPartes, setEditandoPartes] = useState(null);
+  const [editandoId, setEditandoId] = useState(null);
+  const [formEdicao, setFormEdicao] = useState({
+    numero: '',
+    partes: '',
+    classe: 'Cível',
+    fase: '',
+    prazo: '',
+    honorarios: 0,
+    observacoes: ''
+  });
   const [novoProcesso, setNovoProcesso] = useState({
     numero: '',
     partes: '',
@@ -100,6 +109,26 @@ const App = () => {
     }
   };
 
+  const abrirEdicao = (processo) => {
+    setFormEdicao(processo);
+    setEditandoId(processo.id);
+  };
+
+  const salvarEdicao = () => {
+    if (!formEdicao.numero.trim() || !formEdicao.partes.trim() || !formEdicao.prazo) {
+      alert('Preencha: Processo, Partes e Prazo');
+      return;
+    }
+
+    const novosProcessos = processos.map(p =>
+      p.id === editandoId
+        ? { ...formEdicao, honorarios: parseInt(formEdicao.honorarios) || 0 }
+        : p
+    );
+    salvar(novosProcessos);
+    setEditandoId(null);
+  };
+
   const extrairIntimacao = () => {
     if (!intimacao.trim()) return;
     
@@ -155,21 +184,6 @@ const App = () => {
       observacoes: ''
     });
     setView('processos');
-  };
-
-  const atualizarPartes = (id, novasPartes) => {
-    const novosProcessos = processos.map(p => 
-      p.id === id ? { ...p, partes: novasPartes } : p
-    );
-    salvar(novosProcessos);
-    setEditandoPartes(null);
-  };
-
-  const atualizarObservacoes = (id, novasObservacoes) => {
-    const novosProcessos = processos.map(p => 
-      p.id === id ? { ...p, observacoes: novasObservacoes } : p
-    );
-    salvar(novosProcessos);
   };
 
   const remover = (id) => {
@@ -316,36 +330,19 @@ const App = () => {
                       return (
                         <tr key={p.id}>
                           <td className="numero">{p.numero}</td>
-                    <td 
-                            className="partes-cell"
-                            onClick={() => editandoPartes !== p.id && setEditandoPartes(p.id)}
-                            title="Clique para editar"
-                          >
-                            {editandoPartes === p.id ? (
-                               {editandoPartes === p.id ? (
-                              <input 
-                                autoFocus
-                                value={p.partes}
-                                onChange={(e) => atualizarPartes(p.id, e.target.value)}
-                                onBlur={() => setEditandoPartes(null)}
-                                onKeyPress={(e) => e.key === 'Enter' && setEditandoPartes(null)}
-                                className="edit-input"
-                              />
-                            ) : (
-                              <>📝 {p.partes}</>
-                            )}
-                          </td>
+                          <td>📝 {p.partes}</td>
                           <td className="secondary">{p.classe}</td>
                           <td className="secondary">{p.fase}</td>
                           <td className="secondary data">{p.prazo}</td>
                           <td style={{ color: cor, fontWeight: 600 }}>
                             {dias < 0 ? '-' + Math.abs(dias) : dias}d
                           </td>
-                          <td className="obs-cell" title={p.observacoes}>
-                            {p.observacoes ? '📝' : '-'}
-                          </td>
+                          <td className="obs-cell">{p.observacoes ? '✓' : '-'}</td>
                           <td className="action">
-                            <button onClick={() => remover(p.id)}>
+                            <button onClick={() => abrirEdicao(p)}>
+                              ✏️ Editar
+                            </button>
+                            <button onClick={() => remover(p.id)} style={{marginLeft: '4px'}}>
                               Remover
                             </button>
                           </td>
@@ -355,25 +352,6 @@ const App = () => {
                   )}
                 </tbody>
               </table>
-
-              {processosOrdenados.length > 0 && (
-                <div className="obs-modal">
-                  {processosOrdenados.map(p => p.observacoes && (
-                    <div key={p.id} className="obs-item">
-                      <strong>{p.numero}</strong>
-                      <textarea
-                        value={p.observacoes}
-                        onChange={(e) => atualizarObservacoes(p.id, e.target.value)}
-                        placeholder="Adicione observações..."
-                        className="obs-input"
-                      />
-                    </div>
-                  ))}
-                  {!processosOrdenados.some(p => p.observacoes) && (
-                    <p className="no-obs">Clique no ícone 📝 para adicionar observações</p>
-                  )}
-                </div>
-              )}
             </div>
           )}
 
@@ -515,6 +493,101 @@ const App = () => {
           )}
         </div>
       </div>
+
+      {editandoId && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h2>Editar Processo</h2>
+            
+            <div className="form-group">
+              <label>Número do Processo</label>
+              <input 
+                type="text" 
+                value={formEdicao.numero}
+                onChange={(e) => setFormEdicao({...formEdicao, numero: e.target.value})}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Partes</label>
+              <input 
+                type="text" 
+                value={formEdicao.partes}
+                onChange={(e) => setFormEdicao({...formEdicao, partes: e.target.value})}
+              />
+            </div>
+
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px'}}>
+              <div className="form-group" style={{marginBottom: '0'}}>
+                <label>Classe</label>
+                <select 
+                  value={formEdicao.classe}
+                  onChange={(e) => setFormEdicao({...formEdicao, classe: e.target.value})}
+                >
+                  <option>Cível</option>
+                  <option>Ação Penal</option>
+                  <option>Execução</option>
+                  <option>Administrativo</option>
+                  <option>Trabalhista</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{marginBottom: '0'}}>
+                <label>Fase</label>
+                <input 
+                  type="text" 
+                  value={formEdicao.fase}
+                  onChange={(e) => setFormEdicao({...formEdicao, fase: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px'}}>
+              <div className="form-group" style={{marginBottom: '0'}}>
+                <label>Prazo</label>
+                <input 
+                  type="date" 
+                  value={formEdicao.prazo}
+                  onChange={(e) => setFormEdicao({...formEdicao, prazo: e.target.value})}
+                />
+              </div>
+
+              <div className="form-group" style={{marginBottom: '0'}}>
+                <label>Honorários</label>
+                <input 
+                  type="number" 
+                  value={formEdicao.honorarios}
+                  onChange={(e) => setFormEdicao({...formEdicao, honorarios: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Observações</label>
+              <textarea 
+                value={formEdicao.observacoes}
+                onChange={(e) => setFormEdicao({...formEdicao, observacoes: e.target.value})}
+                rows="3"
+              />
+            </div>
+
+            <div className="modal-buttons">
+              <button 
+                className="cancel-btn"
+                onClick={() => setEditandoId(null)}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="submit-btn"
+                onClick={salvarEdicao}
+              >
+                Salvar Mudanças
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modalAberto && (
         <div className="modal-overlay">
