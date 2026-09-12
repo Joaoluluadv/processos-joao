@@ -32,6 +32,25 @@ function checarConfig() {
 
 const dormir = ms => new Promise(r => setTimeout(r, ms));
 
+// Remove valores sensíveis do texto antes de logar (senão o GitHub mascara
+// a linha inteira e não conseguimos ler o diagnóstico).
+function limpar(t) {
+  let s = String(t || '');
+  for (const v of [PROJUDI_URL, USUARIO, SENHA, TOTP_SEGREDO, CODIGO_ESCRITORIO, ROBO_SEGREDO, SITE_URL]) {
+    if (v) s = s.split(v).join('[oculto]');
+  }
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+async function textoDosFrames(page, limite = 300) {
+  const out = [];
+  for (const f of page.frames()) {
+    const t = await f.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '');
+    if (t && t.trim()) out.push(limpar(t).slice(0, limite));
+  }
+  return out;
+}
+
 // --- helpers que enxergam dentro dos frames -------------------------------
 
 // Espera até algum frame ter o seletor; devolve esse frame (ou null).
@@ -153,6 +172,7 @@ async function login(page) {
     return t.includes('ativos:') || t.includes('mesa do(a)') || t.includes('ações 1º grau');
   });
   console.log('Parece logado?', !!logado, '— Diagnóstico:', JSON.stringify(await diagnostico(page)));
+  if (!logado) console.log('Conteúdo das telas:', JSON.stringify(await textoDosFrames(page)));
 }
 
 async function abrirListaAtivos(page) {
