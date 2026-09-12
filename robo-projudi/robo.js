@@ -67,9 +67,19 @@ async function login(page) {
   const clicou = await clicarPorTexto(page, 'Advogados, Partes');
   console.log('Clicou em "Advogados, Partes"?', clicou);
   if (clicou) await page.waitForSelector('#username', { timeout: 15000 }).catch(() => {});
-  console.log('Depois do clique, URL:', page.url());
   console.log('Título da página:', await page.title());
-  console.log('Trecho do conteúdo:', (await page.evaluate(() => document.body.innerText)).slice(0, 300));
+  const diag = await page.evaluate(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return {
+      tamanhoTexto: t.length,
+      contemAdvogados: t.includes('advogados'),
+      contemPartes: t.includes('partes'),
+      contemSignIn: t.includes('sign in') || t.includes('cpf/cnpj'),
+      qtdLinks: document.querySelectorAll('a').length,
+      qtdLi: document.querySelectorAll('li').length
+    };
+  });
+  console.log('Diagnóstico da página:', JSON.stringify(diag));
 
   // ATENÇÃO: seletores confirmados para o login do TJPR (tela Keycloak,
   // "kc-form-login"). Se o campo de senha ou o botão tiverem outro id no seu
