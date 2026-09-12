@@ -48,15 +48,13 @@ function checarConfig() {
 }
 
 async function clicarPorTexto(page, textoAlvo) {
-  const els = await page.$$('a, button, div, td, span');
-  for (const el of els) {
-    const texto = await page.evaluate(e => e.innerText, el).catch(() => '');
-    if (texto && texto.trim().toLowerCase().startsWith(textoAlvo.toLowerCase())) {
-      await el.click();
-      return true;
-    }
-  }
-  return false;
+  return page.evaluate((texto) => {
+    const els = Array.from(document.querySelectorAll('a, button, div, td, span'));
+    const alvo = els.find(e => e.innerText && e.innerText.trim().toLowerCase().startsWith(texto.toLowerCase()));
+    if (!alvo) return false;
+    (alvo.closest('a') || alvo).click();
+    return true;
+  }, textoAlvo);
 }
 
 async function login(page) {
@@ -65,11 +63,12 @@ async function login(page) {
   // Tela inicial do TJPR: precisa clicar em "Advogados, Partes," antes de
   // chegar no formulário de login em si.
   const clicou = await clicarPorTexto(page, 'Advogados, Partes');
-  if (clicou) await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
+  if (clicou) await page.waitForSelector('#username', { timeout: 15000 }).catch(() => {});
 
   // ATENÇÃO: seletores confirmados para o login do TJPR (tela Keycloak,
   // "kc-form-login"). Se o campo de senha ou o botão tiverem outro id no seu
   // tribunal, ajuste aqui.
+  await page.waitForSelector('#username', { timeout: 15000 });
   await page.type('#username', USUARIO, { delay: 20 });
   await page.type('#password', SENHA, { delay: 20 });
   await page.click('#kc-login');
