@@ -47,21 +47,39 @@ function checarConfig() {
   if (faltando.length) { console.error('Faltam variáveis de ambiente:', faltando.join(', ')); process.exit(1); }
 }
 
+async function clicarPorTexto(page, textoAlvo) {
+  const els = await page.$$('a, button, div, td, span');
+  for (const el of els) {
+    const texto = await page.evaluate(e => e.innerText, el).catch(() => '');
+    if (texto && texto.trim().toLowerCase().startsWith(textoAlvo.toLowerCase())) {
+      await el.click();
+      return true;
+    }
+  }
+  return false;
+}
+
 async function login(page) {
   await page.goto(PROJUDI_URL, { waitUntil: 'networkidle2' });
-  // ATENÇÃO: os seletores abaixo (#login, #senha, etc.) são um ponto de partida —
-  // confira os nomes reais dos campos na tela de login do seu tribunal (botão
-  // direito → Inspecionar) e ajuste antes de rodar de verdade.
-  await page.type('#login', USUARIO, { delay: 20 });
-  await page.type('#senha', SENHA, { delay: 20 });
-  await page.click('#btnEntrar');
+
+  // Tela inicial do TJPR: precisa clicar em "Advogados, Partes," antes de
+  // chegar no formulário de login em si.
+  const clicou = await clicarPorTexto(page, 'Advogados, Partes');
+  if (clicou) await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
+
+  // ATENÇÃO: seletores confirmados para o login do TJPR (tela Keycloak,
+  // "kc-form-login"). Se o campo de senha ou o botão tiverem outro id no seu
+  // tribunal, ajuste aqui.
+  await page.type('#username', USUARIO, { delay: 20 });
+  await page.type('#password', SENHA, { delay: 20 });
+  await page.click('#kc-login');
   await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-  const pediu2FA = await page.$('#codigoAutenticacao');
+  const pediu2FA = await page.$('#otp');
   if (pediu2FA) {
     const codigo = authenticator.generate(TOTP_SEGREDO);
-    await page.type('#codigoAutenticacao', codigo, { delay: 20 });
-    await page.click('#btnConfirmar');
+    await page.type('#otp', codigo, { delay: 20 });
+    await page.click('#kc-login');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
   }
 
