@@ -64,6 +64,19 @@ async function login(page) {
     await page.click('#btnConfirmar');
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
   }
+
+  // Tela "Selecione o Perfil de Usuário do Projudi" — só aparece quando o CPF
+  // tem mais de um perfil (ex.: Advogado e Assessor). Clica na linha
+  // "Advogado" para entrar com esse perfil.
+  const escolhaPerfil = await page.$$('table tr');
+  for (const linha of escolhaPerfil) {
+    const texto = await page.evaluate(el => el.innerText, linha);
+    if (texto && texto.trim().toLowerCase().startsWith('advogado')) {
+      await linha.click();
+      await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
+      break;
+    }
+  }
 }
 
 async function lerMovimentos(page, numero) {
