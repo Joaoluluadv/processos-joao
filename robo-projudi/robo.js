@@ -90,8 +90,18 @@ async function diagnostico(page) {
 // --- fluxo ----------------------------------------------------------------
 
 async function login(page) {
-  await page.goto(PROJUDI_URL, { waitUntil: 'networkidle2' });
-  await dormir(1500);
+  let carregou = false;
+  for (let tentativa = 1; tentativa <= 3 && !carregou; tentativa++) {
+    try {
+      await page.goto(PROJUDI_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      carregou = true;
+    } catch (e) {
+      console.log('Tentativa', tentativa, 'de abrir o Projudi falhou:', e.message);
+      await dormir(5000);
+    }
+  }
+  if (!carregou) throw new Error('não conseguiu abrir o site do Projudi');
+  await dormir(2500);
   console.log('Página inicial:', JSON.stringify(await diagnostico(page)));
 
   const clicou = await clicarPorTexto(page, 'Advogados, Partes');
@@ -188,7 +198,7 @@ async function coletarProcessosDaLista(page) {
 }
 
 async function lerMovimentos(page, processo) {
-  await page.goto(processo.href, { waitUntil: 'networkidle2' });
+  await page.goto(processo.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await dormir(1200);
   await clicarPorTexto(page, 'Movimentações');
   await dormir(2000);
@@ -217,6 +227,8 @@ async function main() {
   checarConfig();
   const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   const page = await browser.newPage();
+  page.setDefaultNavigationTimeout(60000);
+  page.setDefaultTimeout(30000);
   await page.setViewport({ width: 1400, height: 900 });
   const movimentos = [];
   try {
