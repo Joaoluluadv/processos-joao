@@ -1,0 +1,11 @@
+{
+  "name": "robo-projudi",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": { "start": "node robo.js" },
+  "dependencies": {
+    "puppeteer": "^22.0.0",
+    "otplib": "^12.0.1",
+    "node-fetch": "^2.7.0"
+  }
+}
