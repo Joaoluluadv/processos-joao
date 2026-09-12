@@ -110,15 +110,23 @@ async function login(page) {
   ]);
   await dormir(1500);
 
-  const fOtp = await frameCom(page, '#otp', 8000);
+  const fOtp = await frameCom(page, '#otp, #totp, input[name="otp"], input[autocomplete="one-time-code"]', 10000);
   if (fOtp) {
-    await fOtp.type('#otp', authenticator.generate(TOTP_SEGREDO), { delay: 20 });
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
-      fOtp.click('#kc-login')
-    ]);
-    await dormir(1500);
-    console.log('2FA enviado');
+    const sel = await fOtp.evaluate(() => {
+      const cands = ['#otp', '#totp', 'input[name="otp"]', 'input[autocomplete="one-time-code"]'];
+      return cands.find(s => document.querySelector(s)) || null;
+    });
+    await fOtp.type(sel, authenticator.generate(TOTP_SEGREDO), { delay: 20 });
+    const btn = await fOtp.evaluate(() => {
+      const b = document.querySelector('#kc-login') || document.querySelector('input[type="submit"]') || document.querySelector('button[type="submit"]');
+      if (!b) return false;
+      b.click();
+      return true;
+    });
+    await dormir(3000);
+    console.log('2FA enviado (campo', sel, ', botão', btn, ')');
+  } else {
+    console.log('Não apareceu campo de 2FA. Diagnóstico:', JSON.stringify(await diagnostico(page)));
   }
 
   const fPerfil = await frameCom(page, '.logonLinkPerfil', 8000);
@@ -126,7 +134,15 @@ async function login(page) {
     await clicarPorTexto(page, 'Advogado');
     await dormir(2500);
     console.log('Perfil "Advogado" selecionado');
+  } else {
+    console.log('Não apareceu escolha de perfil.');
   }
+
+  const logado = await emAlgumFrame(page, () => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('ativos:') || t.includes('mesa do(a)') || t.includes('ações 1º grau');
+  });
+  console.log('Parece logado?', !!logado, '— Diagnóstico:', JSON.stringify(await diagnostico(page)));
 }
 
 async function abrirListaAtivos(page) {
