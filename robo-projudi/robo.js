@@ -59,10 +59,17 @@ async function emAlgumFrame(page, fn, ...args) {
 async function clicarPorTexto(page, textoAlvo) {
   const r = await emAlgumFrame(page, (texto) => {
     const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const alvoNorm = norm(texto);
     const els = Array.from(document.querySelectorAll('a, button, div, td, span, li, h1, h2, h3, strong, b'));
-    const alvo = els.find(e => norm(e.innerText).includes(norm(texto)));
+    // pega todos que contêm o texto e escolhe o MAIS ESPECÍFICO (menor texto),
+    // senão um container grande da página seria clicado sem efeito.
+    const candidatos = els
+      .filter(e => norm(e.innerText).includes(alvoNorm))
+      .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length);
+    const alvo = candidatos[0];
     if (!alvo) return false;
-    (alvo.closest('a') || alvo.closest('[onclick]') || alvo).click();
+    const clicavel = alvo.closest('[onclick]') || alvo.closest('a') || alvo;
+    clicavel.click();
     return true;
   }, textoAlvo);
   return !!r;
