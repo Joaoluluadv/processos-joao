@@ -72,14 +72,27 @@ function hash(s) {
 
 async function paginar(params) {
   const itens = [];
-  for (let pagina = 1; pagina <= 5; pagina++) {
-    const qs = new URLSearchParams(Object.assign({}, params, { pagina: String(pagina), itensPorPagina: '100' }));
-    const resp = await fetch(BASE + '?' + qs.toString(), { headers: { 'Accept': 'application/json' } });
-    if (!resp.ok) throw new Error('DJEN respondeu ' + resp.status);
-    const json = await resp.json();
+  const POR_PAGINA = 50;
+  for (let pagina = 1; pagina <= 8; pagina++) {
+    const qs = new URLSearchParams(Object.assign({}, params, { pagina: String(pagina), itensPorPagina: String(POR_PAGINA) }));
+    const url = BASE + '?' + qs.toString();
+    const resp = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'controle-de-prazos/1.0 (+vercel)'
+      }
+    });
+    const corpo = await resp.text();
+    if (!resp.ok) {
+      throw new Error('o DJEN respondeu ' + resp.status + (corpo ? ' — ' + corpo.slice(0, 180) : ''));
+    }
+    let json;
+    try { json = JSON.parse(corpo); } catch (e) {
+      throw new Error('o DJEN devolveu algo que não é JSON: ' + corpo.slice(0, 180));
+    }
     const lote = (json && (json.items || json.content || json.dados)) || [];
     itens.push(...lote);
-    if (lote.length < 100) break;
+    if (lote.length < POR_PAGINA) break;
   }
   return itens;
 }
@@ -100,15 +113,34 @@ module.exports = async function handler(req, res) {
   const fim = new Date();
   const inicio = new Date(fim.getTime() - dias * 86400000);
 
-  try {
-    const brutos = await paginar({
-      numeroOab: oab,
-      ufOab: uf,
-      dataDisponibilizacaoInicio: diaISO(inicio),
-      dataDisponibilizacaoFim: diaISO(fim)
-    });
+  // o tribunal grava a OAB com ou sem sufixo (123456, 123456-O…) e às vezes com
+  // zeros à esquerda — tenta as variantes e junta o que vier
+  const variantes = [oab];
+  if (/^0+/.test(oab)) variantes.push(oab.replace(/^0+/, ''));
 
-    const comunicacoes = brutos.map(normalizar).filter(c => c.data);
+  try {
+    const brutos = [];
+    const erros = [];
+    for (const v of variantes) {
+      try {
+        const lote = await paginar({
+          numeroOab: v,
+          ufOab: uf,
+          dataDisponibilizacaoInicio: diaISO(inicio),
+          dataDisponibilizacaoFim: diaISO(fim)
+        });
+        brutos.push(...lote);
+      } catch (e) { erros.push(String(e.message || e)); }
+    }
+    if (!brutos.length && erros.length) throw new Error(erros[0]);
+
+    const vistos = {};
+    const comunicacoes = brutos.map(normalizar).filter(c => {
+      if (!c.data) return false;
+      if (vistos[c.id]) return false;
+      vistos[c.id] = true;
+      return true;
+    });
     comunicacoes.sort((a, b) => String(b.data).localeCompare(String(a.data)));
 
     const ultimas = {};
