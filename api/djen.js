@@ -76,10 +76,14 @@ async function paginar(params) {
   for (let pagina = 1; pagina <= 8; pagina++) {
     const qs = new URLSearchParams(Object.assign({}, params, { pagina: String(pagina), itensPorPagina: String(POR_PAGINA) }));
     const url = BASE + '?' + qs.toString();
+    // o DJEN fica atrás de um WAF que rejeita cliente sem cara de navegador
     const resp = await fetch(url, {
       headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'controle-de-prazos/1.0 (+vercel)'
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        'Referer': 'https://comunica.pje.jus.br/',
+        'Origin': 'https://comunica.pje.jus.br'
       }
     });
     const corpo = await resp.text();
