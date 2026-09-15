@@ -19,7 +19,10 @@ const fetch = require('node-fetch');
 const PROJUDI_URL = process.env.PROJUDI_URL || 'https://projudi.tjpr.jus.br/projudi/';
 const USUARIO = process.env.PROJUDI_USUARIO;
 const SENHA = process.env.PROJUDI_SENHA;
-const TOTP_SEGREDO = process.env.PROJUDI_TOTP_SEGREDO;
+// Segredos colados no GitHub às vezes vêm com espaço/quebra de linha extra
+// (ex.: copiado de um terminal) — isso faz o TOTP gerado dar sempre inválido
+// sem nenhum erro visível, então normaliza antes de usar.
+const TOTP_SEGREDO = String(process.env.PROJUDI_TOTP_SEGREDO || '').replace(/\s+/g, '').toUpperCase();
 const CODIGO_ESCRITORIO = process.env.CODIGO_ESCRITORIO;
 const ROBO_SEGREDO = process.env.ROBO_SEGREDO;
 const SITE_URL = process.env.SITE_URL;
@@ -28,6 +31,10 @@ function checarConfig() {
   const faltando = ['PROJUDI_USUARIO', 'PROJUDI_SENHA', 'PROJUDI_TOTP_SEGREDO', 'CODIGO_ESCRITORIO', 'ROBO_SEGREDO', 'SITE_URL']
     .filter(k => !process.env[k]);
   if (faltando.length) { console.error('Faltam variáveis de ambiente:', faltando.join(', ')); process.exit(1); }
+  // Não loga o segredo em si — só o suficiente para diagnosticar um segredo
+  // colado errado (ex.: veio da URL do QR code, ou é o código de 6 dígitos,
+  // em vez do texto base32 que o Projudi mostrou ao cadastrar o Authenticator).
+  console.log('TOTP secreto: tamanho', TOTP_SEGREDO.length, '— parece base32 válido?', /^[A-Z2-7]+=*$/.test(TOTP_SEGREDO));
 }
 
 const dormir = ms => new Promise(r => setTimeout(r, ms));
