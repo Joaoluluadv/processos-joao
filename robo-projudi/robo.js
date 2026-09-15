@@ -19,10 +19,32 @@ const fetch = require('node-fetch');
 const PROJUDI_URL = process.env.PROJUDI_URL || 'https://projudi.tjpr.jus.br/projudi/';
 const USUARIO = process.env.PROJUDI_USUARIO;
 const SENHA = process.env.PROJUDI_SENHA;
+
+// otplib/authenticator (compatível com Google Authenticator) espera o segredo
+// em base32. Algumas ferramentas de leitura de QR code mostram o segredo em
+// hexadecimal (os mesmos bytes, outra codificação) — se vier assim, converte
+// para base32 em vez de tentar usar hex direto, que geraria código sempre errado.
+function hexParaBase32(hex) {
+  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const bytes = Buffer.from(hex, 'hex');
+  let bits = '';
+  for (const b of bytes) bits += b.toString(2).padStart(8, '0');
+  let saida = '';
+  for (let i = 0; i + 5 <= bits.length; i += 5) saida += alfabeto[parseInt(bits.slice(i, i + 5), 2)];
+  const resto = bits.length % 5;
+  if (resto) saida += alfabeto[parseInt(bits.slice(-resto).padEnd(5, '0'), 2)];
+  return saida;
+}
+
 // Segredos colados no GitHub às vezes vêm com espaço/quebra de linha extra
 // (ex.: copiado de um terminal) — isso faz o TOTP gerado dar sempre inválido
 // sem nenhum erro visível, então normaliza antes de usar.
-const TOTP_SEGREDO = String(process.env.PROJUDI_TOTP_SEGREDO || '').replace(/\s+/g, '').toUpperCase();
+const totpBruto = String(process.env.PROJUDI_TOTP_SEGREDO || '').replace(/\s+/g, '').toUpperCase();
+const totpEhBase32 = /^[A-Z2-7]+=*$/.test(totpBruto);
+const totpEhHex = !totpEhBase32 && totpBruto.length % 2 === 0 && /^[0-9A-F]+$/.test(totpBruto);
+const TOTP_SEGREDO = totpEhHex ? hexParaBase32(totpBruto) : totpBruto;
+const TOTP_FORMATO = totpEhBase32 ? 'base32' : (totpEhHex ? 'hex (convertido p/ base32)' : 'desconhecido — confira o segredo');
+
 const CODIGO_ESCRITORIO = process.env.CODIGO_ESCRITORIO;
 const ROBO_SEGREDO = process.env.ROBO_SEGREDO;
 const SITE_URL = process.env.SITE_URL;
@@ -34,7 +56,7 @@ function checarConfig() {
   // Não loga o segredo em si — só o suficiente para diagnosticar um segredo
   // colado errado (ex.: veio da URL do QR code, ou é o código de 6 dígitos,
   // em vez do texto base32 que o Projudi mostrou ao cadastrar o Authenticator).
-  console.log('TOTP secreto: tamanho', TOTP_SEGREDO.length, '— parece base32 válido?', /^[A-Z2-7]+=*$/.test(TOTP_SEGREDO));
+  console.log('TOTP secreto: formato detectado —', TOTP_FORMATO, '— tamanho final', TOTP_SEGREDO.length);
 }
 
 const dormir = ms => new Promise(r => setTimeout(r, ms));
