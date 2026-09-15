@@ -37,18 +37,37 @@ function hexParaBase32(hex) {
 }
 
 // Segredos colados no GitHub às vezes vêm com espaço/quebra de linha extra
-// (ex.: copiado de um terminal), ou é a URI otpauth:// inteira que o leitor
-// de QR code devolveu (só o valor do parâmetro "secret=" interessa) — trata
-// os dois casos antes de decidir se é base32 ou hex.
+// (ex.: copiado de um terminal), embutidos numa URI/trecho tipo "secret=XXXX"
+// (o prefixo "otpauth://totp/...?" pode não estar presente se o texto foi
+// cortado), ou num rótulo tipo "Chave secreta: XXXX XXXX" — tenta cada recorte
+// possível e usa o primeiro que realmente validar como base32 ou hex.
 const totpCru = String(process.env.PROJUDI_TOTP_SEGREDO || '').trim();
-const totpMatchUri = totpCru.match(/[?&]secret=([^&\s]+)/i);
-const totpDaUri = totpMatchUri ? decodeURIComponent(totpMatchUri[1]) : null;
-const totpBruto = (totpDaUri || totpCru).replace(/\s+/g, '').toUpperCase();
-const totpEhBase32 = /^[A-Z2-7]+=*$/.test(totpBruto);
-const totpEhHex = !totpEhBase32 && totpBruto.length % 2 === 0 && /^[0-9A-F]+$/.test(totpBruto);
-const TOTP_SEGREDO = totpEhHex ? hexParaBase32(totpBruto) : totpBruto;
-const TOTP_FORMATO = (totpDaUri ? 'extraído de URI otpauth:// + ' : '') +
-  (totpEhBase32 ? 'base32' : (totpEhHex ? 'hex (convertido p/ base32)' : 'desconhecido — confira o segredo'));
+const totpMatchSecret = totpCru.match(/secret=([^&\s]+)/i);
+const totpMatchRotulo = totpCru.match(/:\s*(.+)$/);
+const totpCandidatos = [
+  { origem: 'trecho "secret=..."', valor: totpMatchSecret && decodeURIComponent(totpMatchSecret[1]) },
+  { origem: 'trecho após "rótulo:"', valor: totpMatchRotulo && totpMatchRotulo[1] },
+  { origem: 'texto original', valor: totpCru }
+].filter(c => c.valor);
+
+function validarSegredo(bruto) {
+  if (/^[A-Z2-7]+=*$/.test(bruto)) return 'base32';
+  if (bruto.length % 2 === 0 && /^[0-9A-F]+$/.test(bruto)) return 'hex';
+  return null;
+}
+
+let totpBruto = '', totpTipo = null, totpOrigem = 'texto original';
+for (const c of totpCandidatos) {
+  const normalizado = c.valor.replace(/\s+/g, '').toUpperCase();
+  const tipo = validarSegredo(normalizado);
+  if (tipo) { totpBruto = normalizado; totpTipo = tipo; totpOrigem = c.origem; break; }
+}
+if (!totpTipo) totpBruto = (totpCandidatos[0] ? totpCandidatos[0].valor : totpCru).replace(/\s+/g, '').toUpperCase();
+
+const TOTP_SEGREDO = totpTipo === 'hex' ? hexParaBase32(totpBruto) : totpBruto;
+const TOTP_FORMATO = totpTipo
+  ? `${totpOrigem} + ${totpTipo === 'hex' ? 'hex (convertido p/ base32)' : 'base32'}`
+  : 'desconhecido — confira o segredo';
 
 const CODIGO_ESCRITORIO = process.env.CODIGO_ESCRITORIO;
 const ROBO_SEGREDO = process.env.ROBO_SEGREDO;
