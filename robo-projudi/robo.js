@@ -37,13 +37,18 @@ function hexParaBase32(hex) {
 }
 
 // Segredos colados no GitHub às vezes vêm com espaço/quebra de linha extra
-// (ex.: copiado de um terminal) — isso faz o TOTP gerado dar sempre inválido
-// sem nenhum erro visível, então normaliza antes de usar.
-const totpBruto = String(process.env.PROJUDI_TOTP_SEGREDO || '').replace(/\s+/g, '').toUpperCase();
+// (ex.: copiado de um terminal), ou é a URI otpauth:// inteira que o leitor
+// de QR code devolveu (só o valor do parâmetro "secret=" interessa) — trata
+// os dois casos antes de decidir se é base32 ou hex.
+const totpCru = String(process.env.PROJUDI_TOTP_SEGREDO || '').trim();
+const totpMatchUri = totpCru.match(/[?&]secret=([^&\s]+)/i);
+const totpDaUri = totpMatchUri ? decodeURIComponent(totpMatchUri[1]) : null;
+const totpBruto = (totpDaUri || totpCru).replace(/\s+/g, '').toUpperCase();
 const totpEhBase32 = /^[A-Z2-7]+=*$/.test(totpBruto);
 const totpEhHex = !totpEhBase32 && totpBruto.length % 2 === 0 && /^[0-9A-F]+$/.test(totpBruto);
 const TOTP_SEGREDO = totpEhHex ? hexParaBase32(totpBruto) : totpBruto;
-const TOTP_FORMATO = totpEhBase32 ? 'base32' : (totpEhHex ? 'hex (convertido p/ base32)' : 'desconhecido — confira o segredo');
+const TOTP_FORMATO = (totpDaUri ? 'extraído de URI otpauth:// + ' : '') +
+  (totpEhBase32 ? 'base32' : (totpEhHex ? 'hex (convertido p/ base32)' : 'desconhecido — confira o segredo'));
 
 const CODIGO_ESCRITORIO = process.env.CODIGO_ESCRITORIO;
 const ROBO_SEGREDO = process.env.ROBO_SEGREDO;
@@ -53,10 +58,14 @@ function checarConfig() {
   const faltando = ['PROJUDI_USUARIO', 'PROJUDI_SENHA', 'PROJUDI_TOTP_SEGREDO', 'CODIGO_ESCRITORIO', 'ROBO_SEGREDO', 'SITE_URL']
     .filter(k => !process.env[k]);
   if (faltando.length) { console.error('Faltam variáveis de ambiente:', faltando.join(', ')); process.exit(1); }
-  // Não loga o segredo em si — só o suficiente para diagnosticar um segredo
-  // colado errado (ex.: veio da URL do QR code, ou é o código de 6 dígitos,
-  // em vez do texto base32 que o Projudi mostrou ao cadastrar o Authenticator).
-  console.log('TOTP secreto: formato detectado —', TOTP_FORMATO, '— tamanho final', TOTP_SEGREDO.length);
+  // Não loga o segredo em si — só pistas sobre o formato, pra diagnosticar
+  // sem nunca expor o valor real no log do GitHub Actions.
+  console.log(
+    'TOTP secreto: formato detectado —', TOTP_FORMATO, '— tamanho final', TOTP_SEGREDO.length,
+    '— original continha "otpauth://"?', /otpauth:\/\//i.test(totpCru),
+    '— original tinha minúsculas?', /[a-z]/.test(totpCru),
+    '— original tinha símbolos (+ / = % : espaço)?', /[+/=%:\s]/.test(totpCru)
+  );
 }
 
 const dormir = ms => new Promise(r => setTimeout(r, ms));
