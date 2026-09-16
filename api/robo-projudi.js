@@ -22,6 +22,9 @@ const URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const SEGREDO = process.env.ROBO_PROJUDI_SEGREDO;
 
+// Quantas movimentações recentes de cada processo o site mostra na linha do tempo.
+const MOVIMENTOS_POR_PROCESSO = 5;
+
 function chave(codigo) {
   return 'prazos_escritorio:' + String(codigo || '').trim().toUpperCase();
 }
@@ -70,6 +73,25 @@ module.exports = async function handler(req, res) {
 
     const novas = movimentos.filter(m => m && m.numero && m.data && m.texto && !vistos[m.numero + '|' + m.data + '|' + m.texto]);
     dados.roboPendentes = pendentesAtuais.concat(novas).slice(-300);
+
+    // "Foto" das últimas movimentações de cada processo, sempre sobrescrita
+    // (sem "já visto"). É daqui que o site monta a linha do tempo: assim as
+    // movimentações aparecem sempre, mesmo que o robô já as tenha enviado antes
+    // ou que o processo não tenha nenhum prazo aberto. A fila roboPendentes
+    // acima continua existindo só para a triagem de publicações/prazos novos.
+    const porProcesso = {};
+    movimentos.forEach(m => {
+      if (!m || !m.numero || !m.data || !m.texto) return;
+      (porProcesso[m.numero] = porProcesso[m.numero] || []).push({ data: m.data, texto: m.texto });
+    });
+    const foto = dados.roboMovimentos || {};
+    Object.keys(porProcesso).forEach(numero => {
+      const lista = porProcesso[numero]
+        .sort((a, b) => String(b.data).localeCompare(String(a.data)))
+        .slice(0, MOVIMENTOS_POR_PROCESSO);
+      foto[numero] = { numero, movimentos: lista, atualizadoEm: Date.now() };
+    });
+    dados.roboMovimentos = foto;
 
     if (Array.isArray(dadosGerais) && dadosGerais.length) {
       const mapa = dados.roboDadosGerais || {};
