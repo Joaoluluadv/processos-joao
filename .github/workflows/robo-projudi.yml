@@ -12,7 +12,12 @@ on:
 jobs:
   atualizar:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # O robô só envia os dados no fim, depois de ler todos os processos: se o
+    # job for cortado no meio, a rodada inteira se perde. Processo grande (1069
+    # movimentos, 500 por página) pode demorar bastante para a aba carregar,
+    # então a margem aqui é folgada de propósito. Não muda o gasto normal (~3min
+    # por rodada) — é só o teto antes de o GitHub matar o job.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
