@@ -1,0 +1,5 @@
+node_modules/
+package-lock.json
+
+# credenciais do robô ao rodar no próprio computador — nunca versionar
+.env

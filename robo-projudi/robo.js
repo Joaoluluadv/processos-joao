@@ -200,7 +200,25 @@ async function login(page) {
       if (espera) await dormir(espera);
     }
   }
-  if (!carregou) throw new Error('não conseguiu abrir o site do Projudi (fora do ar ou bloqueando o acesso)');
+  if (!carregou) {
+    // O navegador não abriu a página, mas isso não diz POR QUÊ. Uma requisição
+    // simples responde a pergunta que importa: se vier status HTTP (403, 503...)
+    // o servidor está de pé e recusando este runner — bloqueio, e insistir não
+    // adianta; se estourar no nível de rede (ETIMEDOUT, ECONNREFUSED), o site
+    // está fora do ar ou inalcançável daqui. Sem isso, cada falha vira mais uma
+    // rodada de adivinhação.
+    let diag;
+    try {
+      const r = await fetch(PROJUDI_URL, { timeout: 20000, redirect: 'manual' });
+      diag = 'respondeu HTTP ' + r.status + ' ' + (r.statusText || '') +
+        ' — servidor de pé; se for 403/503 é bloqueio a este servidor, não queda do Projudi';
+    } catch (e) {
+      diag = 'nem respondeu (' + (e.code || e.type || e.name) + ': ' + e.message + ')' +
+        ' — fora do ar ou inalcançável daqui';
+    }
+    console.log('Diagnóstico do acesso ao Projudi:', limpar(diag));
+    throw new Error('não conseguiu abrir o site do Projudi (fora do ar ou bloqueando o acesso)');
+  }
   await dormir(2500);
   console.log('Página inicial:', JSON.stringify(await diagnostico(page)));
 
