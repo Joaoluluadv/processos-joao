@@ -46,10 +46,15 @@ async function consultar(indice, numero) {
     // existem, viram o texto completo do movimento.
     const compl = (m.complementosTabelados || [])
       .map(c => {
-        const rotulo = (c.descricao || c.nome || '').trim();
+        const desc = (c.descricao || '').trim();
+        const nome = (c.nome || '').trim();
+        // "nome" às vezes é a chave técnica do campo (ex.: "tipo_de_documento"), não uma
+        // descrição para o advogado — só usa quando parece texto legível (tem espaço).
+        const rotulo = desc || (/\s/.test(nome) ? nome : '');
         const valor = (c.valor !== undefined && c.valor !== null ? String(c.valor) : '').trim();
-        if (rotulo && valor && rotulo.toLowerCase() !== valor.toLowerCase()) return rotulo + ': ' + valor;
-        return rotulo || valor;
+        if (!rotulo) return '';
+        if (valor && rotulo.toLowerCase() !== valor.toLowerCase()) return rotulo + ': ' + valor;
+        return rotulo;
       })
       .filter(Boolean);
     const base = m.nome || 'Movimentação';
