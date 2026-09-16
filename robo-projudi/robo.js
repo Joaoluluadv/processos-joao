@@ -132,6 +132,22 @@ async function emAlgumFrame(page, fn, ...args) {
   return null;
 }
 
+// Igual ao emAlgumFrame, mas insiste até o conteúdo aparecer (ou estourar o
+// tempo). Aba do Projudi carrega por Ajax, e processo grande demora: um
+// processo com 1069 movimentos exibindo 500 por página não fica pronto em 2s.
+// Com espera fixa, o robô lia a tabela antes de ela existir e concluía, errado,
+// que o processo não tinha movimentação nenhuma.
+async function esperarEmAlgumFrame(page, fn, timeout = 25000, ...args) {
+  const limite = Date.now() + timeout;
+  let ultimo = null;
+  while (Date.now() < limite) {
+    ultimo = await emAlgumFrame(page, fn, ...args);
+    if (ultimo) return ultimo;
+    await dormir(700);
+  }
+  return null;
+}
+
 async function clicarPorTexto(page, textoAlvo) {
   const r = await emAlgumFrame(page, (texto) => {
     const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -318,8 +334,7 @@ async function lerDadosGerais(page) {
 // que muda de rótulo conforme o tipo de ação (Requerente/Autor/Exequente...).
 async function lerPartes(page) {
   await clicarPorTexto(page, 'Partes e Outros');
-  await dormir(1500);
-  const r = await emAlgumFrame(page, () => {
+  const r = await esperarEmAlgumFrame(page, () => {
     const marcadores = ['promoventesPageSize', 'promovidasPageSize', 'terceirasPageSize'];
     function tabelaAposMarcador(nome) {
       const marcador = document.querySelector('input[type="hidden"][name="' + nome + '"]');
@@ -343,6 +358,10 @@ async function lerPartes(page) {
     const tabPassivo = tabelaAposMarcador('promovidasPageSize');
     const colsAtivo = colunas(primeiraLinhaDeDados(tabAtivo));
     const colsPassivo = colunas(primeiraLinhaDeDados(tabPassivo));
+    // devolve "false" enquanto não achou nome nenhum, para quem chamou continuar
+    // esperando/procurando em outro frame — devolver um objeto vazio aqui daria
+    // a aba como lida antes de ela ter carregado
+    if (!colsAtivo[1] && !colsPassivo[1]) return false;
     // Confirmado pelo diagnóstico em produção (31 processos, todos os tipos de
     // ação): a coluna 0 vem sempre vazia (ícone/checkbox) e a coluna 1 é o nome
     // da parte, nessa ordem, sempre.
@@ -361,8 +380,7 @@ async function lerPartes(page) {
 
 async function lerMovimentos(page) {
   await clicarPorTexto(page, 'Movimentações');
-  await dormir(2000);
-  const r = await emAlgumFrame(page, () => {
+  const r = await esperarEmAlgumFrame(page, () => {
     const tabelas = Array.from(document.querySelectorAll('table'));
     const tabela = tabelas.find(t => t.innerText.includes('Seq.') && t.innerText.includes('Evento'));
     if (!tabela) return false;
@@ -388,8 +406,26 @@ async function lerDadosProcesso(page, processo) {
   const gerais = await lerDadosGerais(page);
   const partes = await lerPartes(page);
   const linhasMov = await lerMovimentos(page);
+  // se mesmo esperando não veio movimento nenhum, registra o que a tela tinha,
+  // para dar pra saber se foi aba errada, tabela com outro cabeçalho ou timeout
+  let diagnosticoMovimentos = '';
+  if (!linhasMov.length) {
+    const probe = await emAlgumFrame(page, () => {
+      const t = (document.body && document.body.innerText) || '';
+      if (!t.trim()) return false;
+      return {
+        tamanho: t.length,
+        temSeq: t.includes('Seq.'),
+        temEvento: t.includes('Evento'),
+        registros: (t.match(/\d+\s+registro\(s\) encontrado\(s\)/) || [''])[0],
+        inicio: t.replace(/\s+/g, ' ').slice(0, 120)
+      };
+    });
+    diagnosticoMovimentos = probe ? JSON.stringify(probe.resultado) : '(nenhum frame com texto)';
+  }
   return {
     movimentos: linhasMov.map(l => ({ numero: processo.numero, data: l.data, texto: l.texto })),
+    diagnosticoMovimentos,
     dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes: partes.texto },
     diagnosticoPartes: { colsAtivo: partes.colsAtivo, colsPassivo: partes.colsPassivo },
     diagnosticoJuizo: gerais.diagnosticoJuizo || []
@@ -427,6 +463,9 @@ async function main() {
         // esse dado fica nessa versão do Projudi
         if (r.diagnosticoJuizo.length) {
           console.log('  juízo (diagnóstico):', JSON.stringify(r.diagnosticoJuizo));
+        }
+        if (r.diagnosticoMovimentos) {
+          console.log('  sem movimentos (diagnóstico):', limpar(r.diagnosticoMovimentos));
         }
       } catch (e) {
         console.error('Falhou em', processo.numero, ':', e.message);
