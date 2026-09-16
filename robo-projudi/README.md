@@ -66,7 +66,8 @@ SITE_URL=https://processos-joao.vercel.app
 E na Vercel (Settings → Environment Variables do projeto), adicione a mesma
 `ROBO_PROJUDI_SEGREDO` com o valor de `ROBO_SEGREDO` acima.
 
-Edite `processos.json` com os números dos processos que o robô deve checar.
+O robô lê sozinho a lista "Ativos:" do Projudi a cada execução — não precisa
+cadastrar números de processo em lugar nenhum, ele pega todos automaticamente.
 
 ## Rodar manualmente (teste)
 

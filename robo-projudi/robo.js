@@ -19,7 +19,56 @@ const fetch = require('node-fetch');
 const PROJUDI_URL = process.env.PROJUDI_URL || 'https://projudi.tjpr.jus.br/projudi/';
 const USUARIO = process.env.PROJUDI_USUARIO;
 const SENHA = process.env.PROJUDI_SENHA;
-const TOTP_SEGREDO = process.env.PROJUDI_TOTP_SEGREDO;
+
+// otplib/authenticator (compatível com Google Authenticator) espera o segredo
+// em base32. Algumas ferramentas de leitura de QR code mostram o segredo em
+// hexadecimal (os mesmos bytes, outra codificação) — se vier assim, converte
+// para base32 em vez de tentar usar hex direto, que geraria código sempre errado.
+function hexParaBase32(hex) {
+  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const bytes = Buffer.from(hex, 'hex');
+  let bits = '';
+  for (const b of bytes) bits += b.toString(2).padStart(8, '0');
+  let saida = '';
+  for (let i = 0; i + 5 <= bits.length; i += 5) saida += alfabeto[parseInt(bits.slice(i, i + 5), 2)];
+  const resto = bits.length % 5;
+  if (resto) saida += alfabeto[parseInt(bits.slice(-resto).padEnd(5, '0'), 2)];
+  return saida;
+}
+
+// Segredos colados no GitHub às vezes vêm com espaço/quebra de linha extra
+// (ex.: copiado de um terminal), embutidos numa URI/trecho tipo "secret=XXXX"
+// (o prefixo "otpauth://totp/...?" pode não estar presente se o texto foi
+// cortado), ou num rótulo tipo "Chave secreta: XXXX XXXX" — tenta cada recorte
+// possível e usa o primeiro que realmente validar como base32 ou hex.
+const totpCru = String(process.env.PROJUDI_TOTP_SEGREDO || '').trim();
+const totpMatchSecret = totpCru.match(/secret=([^&\s]+)/i);
+const totpMatchRotulo = totpCru.match(/:\s*(.+)$/);
+const totpCandidatos = [
+  { origem: 'trecho "secret=..."', valor: totpMatchSecret && decodeURIComponent(totpMatchSecret[1]) },
+  { origem: 'trecho após "rótulo:"', valor: totpMatchRotulo && totpMatchRotulo[1] },
+  { origem: 'texto original', valor: totpCru }
+].filter(c => c.valor);
+
+function validarSegredo(bruto) {
+  if (/^[A-Z2-7]+=*$/.test(bruto)) return 'base32';
+  if (bruto.length % 2 === 0 && /^[0-9A-F]+$/.test(bruto)) return 'hex';
+  return null;
+}
+
+let totpBruto = '', totpTipo = null, totpOrigem = 'texto original';
+for (const c of totpCandidatos) {
+  const normalizado = c.valor.replace(/\s+/g, '').toUpperCase();
+  const tipo = validarSegredo(normalizado);
+  if (tipo) { totpBruto = normalizado; totpTipo = tipo; totpOrigem = c.origem; break; }
+}
+if (!totpTipo) totpBruto = (totpCandidatos[0] ? totpCandidatos[0].valor : totpCru).replace(/\s+/g, '').toUpperCase();
+
+const TOTP_SEGREDO = totpTipo === 'hex' ? hexParaBase32(totpBruto) : totpBruto;
+const TOTP_FORMATO = totpTipo
+  ? `${totpOrigem} + ${totpTipo === 'hex' ? 'hex (convertido p/ base32)' : 'base32'}`
+  : 'desconhecido — confira o segredo';
+
 const CODIGO_ESCRITORIO = process.env.CODIGO_ESCRITORIO;
 const ROBO_SEGREDO = process.env.ROBO_SEGREDO;
 const SITE_URL = process.env.SITE_URL;
@@ -28,6 +77,14 @@ function checarConfig() {
   const faltando = ['PROJUDI_USUARIO', 'PROJUDI_SENHA', 'PROJUDI_TOTP_SEGREDO', 'CODIGO_ESCRITORIO', 'ROBO_SEGREDO', 'SITE_URL']
     .filter(k => !process.env[k]);
   if (faltando.length) { console.error('Faltam variáveis de ambiente:', faltando.join(', ')); process.exit(1); }
+  // Não loga o segredo em si — só pistas sobre o formato, pra diagnosticar
+  // sem nunca expor o valor real no log do GitHub Actions.
+  console.log(
+    'TOTP secreto: formato detectado —', TOTP_FORMATO, '— tamanho final', TOTP_SEGREDO.length,
+    '— original continha "otpauth://"?', /otpauth:\/\//i.test(totpCru),
+    '— original tinha minúsculas?', /[a-z]/.test(totpCru),
+    '— original tinha símbolos (+ / = % : espaço)?', /[+/=%:\s]/.test(totpCru)
+  );
 }
 
 const dormir = ms => new Promise(r => setTimeout(r, ms));
