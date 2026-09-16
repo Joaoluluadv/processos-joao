@@ -181,18 +181,26 @@ async function diagnostico(page) {
 
 // --- fluxo ----------------------------------------------------------------
 
+// Espera entre as tentativas de abrir o Projudi, crescendo a cada falha. Antes
+// eram 3 tentativas de 5 em 5 segundos: a janela toda dava ~3 minutos, curta
+// demais para atravessar uma instabilidade do Projudi (que sai do ar de vez em
+// quando) — e uma rodada perdida só volta na hora seguinte.
+const ESPERAS_LOGIN = [10000, 30000, 60000, 120000];
+
 async function login(page) {
   let carregou = false;
-  for (let tentativa = 1; tentativa <= 3 && !carregou; tentativa++) {
+  for (let tentativa = 1; tentativa <= ESPERAS_LOGIN.length + 1 && !carregou; tentativa++) {
     try {
       await page.goto(PROJUDI_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
       carregou = true;
     } catch (e) {
-      console.log('Tentativa', tentativa, 'de abrir o Projudi falhou:', e.message);
-      await dormir(5000);
+      const espera = ESPERAS_LOGIN[tentativa - 1];
+      console.log('Tentativa', tentativa, 'de abrir o Projudi falhou:', e.message,
+        espera ? '— tentando de novo em ' + (espera / 1000) + 's' : '');
+      if (espera) await dormir(espera);
     }
   }
-  if (!carregou) throw new Error('não conseguiu abrir o site do Projudi');
+  if (!carregou) throw new Error('não conseguiu abrir o site do Projudi (fora do ar ou bloqueando o acesso)');
   await dormir(2500);
   console.log('Página inicial:', JSON.stringify(await diagnostico(page)));
 
