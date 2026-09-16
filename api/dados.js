@@ -50,8 +50,18 @@ module.exports = async function handler(req, res) {
       const codigo = body && body.codigo;
       const dados = body && body.dados;
       if (!codigo || !dados) { res.status(400).json({ erro: 'Informe { codigo, dados }' }); return; }
+
+      // Faz merge em cima do que já está salvo, em vez de SET direto: o site só
+      // conhece processos/publicacoes/eventos/integracao, mas o robô do Projudi
+      // grava campos próprios (roboPendentes, roboDadosGerais) na mesma chave.
+      // Um SET cego aqui apagaria qualquer atualização do robô que tivesse
+      // chegado entre o site buscar os dados e salvar de volta.
+      const bruto = await kvCmd(['GET', chave(codigo)]);
+      const atual = bruto ? (JSON.parse(bruto).dados || {}) : {};
+      const mesclado = Object.assign({}, atual, dados);
+
       const atualizadoEm = Date.now();
-      await kvCmd(['SET', chave(codigo), JSON.stringify({ dados, atualizadoEm })]);
+      await kvCmd(['SET', chave(codigo), JSON.stringify({ dados: mesclado, atualizadoEm })]);
       res.status(200).json({ ok: true, atualizadoEm });
       return;
     }
