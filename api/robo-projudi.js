@@ -6,7 +6,13 @@
 // DataJud), ou entra como publicação a triar.
 //
 // Rota: POST /api/robo-projudi
-// Body: { codigo, segredo, movimentos: [{ numero, data: 'AAAA-MM-DD', texto }] }
+// Body: { codigo, segredo, movimentos: [{ numero, data: 'AAAA-MM-DD', texto }],
+//         dadosGerais: [{ numero, classeProcessual, assunto, juizo, partes }] }
+//
+// dadosGerais é opcional — uma "foto" atual de cada processo (classe
+// processual detalhada, assunto, juízo, partes), sem histórico. O site usa
+// isso só pra preencher campos que ainda estão vazios, nunca para sobrescrever
+// algo que a pessoa já preencheu à mão.
 //
 // Exige a mesma integração Vercel KV usada por /api/dados, e a variável de
 // ambiente ROBO_PROJUDI_SEGREDO (defina você mesmo, qualquer texto — é a senha
@@ -41,6 +47,7 @@ module.exports = async function handler(req, res) {
   const codigo = body && body.codigo;
   const segredo = body && body.segredo;
   const movimentos = (body && body.movimentos) || [];
+  const dadosGerais = (body && body.dadosGerais) || [];
   if (!codigo) { res.status(400).json({ erro: 'Informe { codigo }' }); return; }
   if (segredo !== SEGREDO) { res.status(401).json({ erro: 'Segredo inválido' }); return; }
   if (!Array.isArray(movimentos) || !movimentos.length) { res.status(400).json({ erro: 'Informe { movimentos: [...] }' }); return; }
@@ -58,6 +65,22 @@ module.exports = async function handler(req, res) {
 
     const novas = movimentos.filter(m => m && m.numero && m.data && m.texto && !vistos[m.numero + '|' + m.data + '|' + m.texto]);
     dados.roboPendentes = pendentesAtuais.concat(novas).slice(-300);
+
+    if (Array.isArray(dadosGerais) && dadosGerais.length) {
+      const mapa = dados.roboDadosGerais || {};
+      dadosGerais.forEach(d => {
+        if (!d || !d.numero) return;
+        mapa[d.numero] = {
+          numero: d.numero,
+          classeProcessual: d.classeProcessual || '',
+          assunto: d.assunto || '',
+          juizo: d.juizo || '',
+          partes: d.partes || '',
+          atualizadoEm: Date.now()
+        };
+      });
+      dados.roboDadosGerais = mapa;
+    }
 
     const atualizadoEm = Date.now();
     await kvCmd(['SET', chave(codigo), JSON.stringify({ dados, atualizadoEm })]);
