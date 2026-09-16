@@ -290,13 +290,26 @@ async function lerDadosGerais(page) {
       while (prox && !prox.innerText.trim()) prox = prox.nextElementSibling;
       return prox ? prox.innerText.replace(/\s+/g, ' ').trim() : '';
     }
+    const juizo = porRotulo('Juízo:');
+    // Diagnóstico: se não achou pelo padrão <td>Juízo:</td><td>valor</td>,
+    // procura qualquer elemento pequeno (sem filhos com o mesmo texto, pra não
+    // pegar a página inteira) que contenha a palavra "Juízo" e manda um
+    // pedacinho do texto pro log, pra descobrir onde esse dado realmente fica.
+    let diagnosticoJuizo = [];
+    if (!juizo) {
+      const todos = Array.from(document.querySelectorAll('td,span,div,a,li'));
+      diagnosticoJuizo = todos
+        .filter(el => /ju[íi]zo/i.test(el.innerText || '') && !Array.from(el.children).some(c => /ju[íi]zo/i.test(c.innerText || '')))
+        .slice(0, 5)
+        .map(el => (el.tagName + ': ' + el.innerText.replace(/\s+/g, ' ').trim()).slice(0, 160));
+    }
     return {
       classeProcessual: porRotulo('Classe Processual:'),
       assunto: porRotulo('Assunto Principal:'),
-      juizo: porRotulo('Juízo:')
+      juizo, diagnosticoJuizo
     };
   });
-  return r ? r.resultado : { classeProcessual: '', assunto: '', juizo: '' };
+  return r ? r.resultado : { classeProcessual: '', assunto: '', juizo: '', diagnosticoJuizo: [] };
 }
 
 // Lê o nome da primeira parte de cada polo (autor/réu) na aba "Partes e Outros".
@@ -330,12 +343,12 @@ async function lerPartes(page) {
     const tabPassivo = tabelaAposMarcador('promovidasPageSize');
     const colsAtivo = colunas(primeiraLinhaDeDados(tabAtivo));
     const colsPassivo = colunas(primeiraLinhaDeDados(tabPassivo));
-    // Ainda não sabemos com certeza em qual coluna fica o nome (varia conforme o
-    // tipo de ação) — por ora chuta a primeira não vazia, mas manda todas as
-    // colunas encontradas pro log poder confirmar/corrigir isso.
+    // Confirmado pelo diagnóstico em produção (31 processos, todos os tipos de
+    // ação): a coluna 0 vem sempre vazia (ícone/checkbox) e a coluna 1 é o nome
+    // da parte, nessa ordem, sempre.
     return {
-      ativo: colsAtivo.find(Boolean) || '',
-      passivo: colsPassivo.find(Boolean) || '',
+      ativo: colsAtivo[1] || '',
+      passivo: colsPassivo[1] || '',
       colsAtivo, colsPassivo
     };
   });
@@ -377,13 +390,9 @@ async function lerDadosProcesso(page, processo) {
   const linhasMov = await lerMovimentos(page);
   return {
     movimentos: linhasMov.map(l => ({ numero: processo.numero, data: l.data, texto: l.texto })),
-    // "partes" ainda não vai pro site — a 1ª tentativa pegou endereço em vez de
-    // nome (coluna errada). Manda vazio até confirmar a coluna certa pelo
-    // diagnóstico no log, pra não gravar dado errado que depois trava (o site só
-    // preenche campo vazio, não sobrescreve — então um valor errado gravado uma
-    // vez fica preso até alguém corrigir à mão).
-    dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes: '' },
-    diagnosticoPartes: { colsAtivo: partes.colsAtivo, colsPassivo: partes.colsPassivo }
+    dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes: partes.texto },
+    diagnosticoPartes: { colsAtivo: partes.colsAtivo, colsPassivo: partes.colsPassivo },
+    diagnosticoJuizo: gerais.diagnosticoJuizo || []
   };
 }
 
@@ -411,14 +420,14 @@ async function main() {
           processo.numero, '→', r.movimentos.length, 'movimentos',
           '· classe:', r.dadosGerais.classeProcessual || '(vazio)',
           '· assunto:', r.dadosGerais.assunto || '(vazio)',
-          '· juízo:', r.dadosGerais.juizo || '(vazio)'
+          '· juízo:', r.dadosGerais.juizo || '(vazio)',
+          '· partes:', r.dadosGerais.partes || '(vazio)'
         );
-        // ainda ajustando a coluna certa do nome da parte — loga todas as colunas
-        // da 1ª linha de cada tabela (promovente/promovido) pra confirmar/corrigir
-        console.log(
-          '  partes (diagnóstico) — polo ativo colunas:', JSON.stringify(r.diagnosticoPartes.colsAtivo),
-          '· polo passivo colunas:', JSON.stringify(r.diagnosticoPartes.colsPassivo)
-        );
+        // ainda sem achar o padrão certo do Juízo — loga pistas pra descobrir onde
+        // esse dado fica nessa versão do Projudi
+        if (r.diagnosticoJuizo.length) {
+          console.log('  juízo (diagnóstico):', JSON.stringify(r.diagnosticoJuizo));
+        }
       } catch (e) {
         console.error('Falhou em', processo.numero, ':', e.message);
       }
