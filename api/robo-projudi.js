@@ -57,9 +57,14 @@ module.exports = async function handler(req, res) {
     const registro = bruto ? JSON.parse(bruto) : { dados: { processos: [], publicacoes: [], eventos: [] } };
     const dados = registro.dados || {};
 
+    // "Já visto" só conta se o movimento realmente entrou na linha do tempo de um
+    // processo (dados.processos[].movimentacoes). NÃO conta publicações: antes de
+    // comparar número só pelos dígitos, um movimento podia virar só uma
+    // "publicação solta" (número não bateu com nenhum processo cadastrado) — se
+    // isso contasse como "já visto", o robô nunca mais reenviaria esse movimento,
+    // e ele ficaria pra sempre sem processo associado.
     const vistos = {};
     (dados.processos || []).forEach(p => (p.movimentacoes || []).forEach(m => { vistos[p.numero + '|' + m.data + '|' + m.texto] = true; }));
-    (dados.publicacoes || []).forEach(pb => { vistos[pb.numero + '|' + pb.data + '|' + pb.texto] = true; });
     const pendentesAtuais = dados.roboPendentes || [];
     pendentesAtuais.forEach(m => { vistos[m.numero + '|' + m.data + '|' + m.texto] = true; });
 
