@@ -280,12 +280,15 @@ async function coletarProcessosDaLista(page) {
 async function lerDadosGerais(page) {
   const r = await emAlgumFrame(page, () => {
     function porRotulo(rotulo) {
+      // innerText (não textContent!) — o Projudi põe um <script> de balãozinho de
+      // ajuda dentro da própria célula do valor; textContent inclui esse script
+      // no texto, innerText respeita o que é realmente exibido na tela.
       const tds = Array.from(document.querySelectorAll('td'));
-      const alvo = tds.find(td => td.textContent.replace(/\s+/g, ' ').trim() === rotulo);
+      const alvo = tds.find(td => td.innerText.replace(/\s+/g, ' ').trim() === rotulo);
       if (!alvo) return '';
       let prox = alvo.nextElementSibling;
-      while (prox && !prox.textContent.trim()) prox = prox.nextElementSibling;
-      return prox ? prox.textContent.replace(/\s+/g, ' ').trim() : '';
+      while (prox && !prox.innerText.trim()) prox = prox.nextElementSibling;
+      return prox ? prox.innerText.replace(/\s+/g, ' ').trim() : '';
     }
     return {
       classeProcessual: porRotulo('Classe Processual:'),
@@ -316,23 +319,31 @@ async function lerPartes(page) {
       }
       return null;
     }
-    function primeiroNome(tabela) {
-      if (!tabela) return '';
-      const linhas = Array.from(tabela.querySelectorAll('tbody tr'));
-      for (const tr of linhas) {
-        if (tr.querySelector('th')) continue;
-        const cel = tr.querySelector('td');
-        if (cel && cel.textContent.trim()) return cel.textContent.replace(/\s+/g, ' ').trim();
-      }
-      return '';
+    function primeiraLinhaDeDados(tabela) {
+      if (!tabela) return null;
+      return Array.from(tabela.querySelectorAll('tbody tr')).find(tr => !tr.querySelector('th')) || null;
     }
+    function colunas(tr) {
+      return tr ? Array.from(tr.querySelectorAll('td')).map(td => td.innerText.replace(/\s+/g, ' ').trim()) : [];
+    }
+    const tabAtivo = tabelaAposMarcador('promoventesPageSize');
+    const tabPassivo = tabelaAposMarcador('promovidasPageSize');
+    const colsAtivo = colunas(primeiraLinhaDeDados(tabAtivo));
+    const colsPassivo = colunas(primeiraLinhaDeDados(tabPassivo));
+    // Ainda não sabemos com certeza em qual coluna fica o nome (varia conforme o
+    // tipo de ação) — por ora chuta a primeira não vazia, mas manda todas as
+    // colunas encontradas pro log poder confirmar/corrigir isso.
     return {
-      ativo: primeiroNome(tabelaAposMarcador('promoventesPageSize')),
-      passivo: primeiroNome(tabelaAposMarcador('promovidasPageSize'))
+      ativo: colsAtivo.find(Boolean) || '',
+      passivo: colsPassivo.find(Boolean) || '',
+      colsAtivo, colsPassivo
     };
   });
-  const partes = r ? r.resultado : { ativo: '', passivo: '' };
-  return [partes.ativo, partes.passivo].filter(Boolean).join(' x ');
+  const partes = r ? r.resultado : { ativo: '', passivo: '', colsAtivo: [], colsPassivo: [] };
+  return {
+    texto: [partes.ativo, partes.passivo].filter(Boolean).join(' x '),
+    colsAtivo: partes.colsAtivo, colsPassivo: partes.colsPassivo
+  };
 }
 
 async function lerMovimentos(page) {
@@ -366,7 +377,13 @@ async function lerDadosProcesso(page, processo) {
   const linhasMov = await lerMovimentos(page);
   return {
     movimentos: linhasMov.map(l => ({ numero: processo.numero, data: l.data, texto: l.texto })),
-    dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes }
+    // "partes" ainda não vai pro site — a 1ª tentativa pegou endereço em vez de
+    // nome (coluna errada). Manda vazio até confirmar a coluna certa pelo
+    // diagnóstico no log, pra não gravar dado errado que depois trava (o site só
+    // preenche campo vazio, não sobrescreve — então um valor errado gravado uma
+    // vez fica preso até alguém corrigir à mão).
+    dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes: '' },
+    diagnosticoPartes: { colsAtivo: partes.colsAtivo, colsPassivo: partes.colsPassivo }
   };
 }
 
@@ -394,8 +411,13 @@ async function main() {
           processo.numero, '→', r.movimentos.length, 'movimentos',
           '· classe:', r.dadosGerais.classeProcessual || '(vazio)',
           '· assunto:', r.dadosGerais.assunto || '(vazio)',
-          '· juízo:', r.dadosGerais.juizo || '(vazio)',
-          '· partes:', r.dadosGerais.partes || '(vazio)'
+          '· juízo:', r.dadosGerais.juizo || '(vazio)'
+        );
+        // ainda ajustando a coluna certa do nome da parte — loga todas as colunas
+        // da 1ª linha de cada tabela (promovente/promovido) pra confirmar/corrigir
+        console.log(
+          '  partes (diagnóstico) — polo ativo colunas:', JSON.stringify(r.diagnosticoPartes.colsAtivo),
+          '· polo passivo colunas:', JSON.stringify(r.diagnosticoPartes.colsPassivo)
         );
       } catch (e) {
         console.error('Falhou em', processo.numero, ':', e.message);
