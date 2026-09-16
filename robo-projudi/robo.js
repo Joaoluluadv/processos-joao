@@ -274,9 +274,68 @@ async function coletarProcessosDaLista(page) {
   return todos.filter(p => (vistos.has(p.numero) ? false : (vistos.add(p.numero), true)));
 }
 
-async function lerMovimentos(page, processo) {
-  await page.goto(processo.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await dormir(1200);
+// Lê Classe Processual / Assunto Principal / Juízo — campos de rótulo+valor
+// visíveis na aba inicial do processo (mesmo padrão em todo o Projudi:
+// <td>Rótulo:</td><td>valor</td> ou <td>Rótulo:</td><td><a>valor</a></td>).
+async function lerDadosGerais(page) {
+  const r = await emAlgumFrame(page, () => {
+    function porRotulo(rotulo) {
+      const tds = Array.from(document.querySelectorAll('td'));
+      const alvo = tds.find(td => td.textContent.replace(/\s+/g, ' ').trim() === rotulo);
+      if (!alvo) return '';
+      let prox = alvo.nextElementSibling;
+      while (prox && !prox.textContent.trim()) prox = prox.nextElementSibling;
+      return prox ? prox.textContent.replace(/\s+/g, ' ').trim() : '';
+    }
+    return {
+      classeProcessual: porRotulo('Classe Processual:'),
+      assunto: porRotulo('Assunto Principal:'),
+      juizo: porRotulo('Juízo:')
+    };
+  });
+  return r ? r.resultado : { classeProcessual: '', assunto: '', juizo: '' };
+}
+
+// Lê o nome da primeira parte de cada polo (autor/réu) na aba "Partes e Outros".
+// O Projudi marca cada seção com um <input type="hidden"> antes da tabela
+// (ex.: name="promoventesPageSize") — mais estável do que procurar por <h4>,
+// que muda de rótulo conforme o tipo de ação (Requerente/Autor/Exequente...).
+async function lerPartes(page) {
+  await clicarPorTexto(page, 'Partes e Outros');
+  await dormir(1500);
+  const r = await emAlgumFrame(page, () => {
+    const marcadores = ['promoventesPageSize', 'promovidasPageSize', 'terceirasPageSize'];
+    function tabelaAposMarcador(nome) {
+      const marcador = document.querySelector('input[type="hidden"][name="' + nome + '"]');
+      if (!marcador) return null;
+      let el = marcador.nextElementSibling;
+      while (el) {
+        if (el.tagName === 'INPUT' && el.type === 'hidden' && marcadores.includes(el.getAttribute('name'))) break;
+        if (el.tagName === 'TABLE') return el;
+        el = el.nextElementSibling;
+      }
+      return null;
+    }
+    function primeiroNome(tabela) {
+      if (!tabela) return '';
+      const linhas = Array.from(tabela.querySelectorAll('tbody tr'));
+      for (const tr of linhas) {
+        if (tr.querySelector('th')) continue;
+        const cel = tr.querySelector('td');
+        if (cel && cel.textContent.trim()) return cel.textContent.replace(/\s+/g, ' ').trim();
+      }
+      return '';
+    }
+    return {
+      ativo: primeiroNome(tabelaAposMarcador('promoventesPageSize')),
+      passivo: primeiroNome(tabelaAposMarcador('promovidasPageSize'))
+    };
+  });
+  const partes = r ? r.resultado : { ativo: '', passivo: '' };
+  return [partes.ativo, partes.passivo].filter(Boolean).join(' x ');
+}
+
+async function lerMovimentos(page) {
   await clicarPorTexto(page, 'Movimentações');
   await dormir(2000);
   const r = await emAlgumFrame(page, () => {
@@ -295,9 +354,20 @@ async function lerMovimentos(page, processo) {
     }).filter(Boolean);
     return linhas.length ? linhas : false;
   });
-  if (!r) return [];
   // só as 10 mais recentes de cada processo, para não inflar o envio
-  return r.resultado.slice(0, 10).map(l => ({ numero: processo.numero, data: l.data, texto: l.texto }));
+  return r ? r.resultado.slice(0, 10) : [];
+}
+
+async function lerDadosProcesso(page, processo) {
+  await page.goto(processo.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await dormir(1200);
+  const gerais = await lerDadosGerais(page);
+  const partes = await lerPartes(page);
+  const linhasMov = await lerMovimentos(page);
+  return {
+    movimentos: linhasMov.map(l => ({ numero: processo.numero, data: l.data, texto: l.texto })),
+    dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes }
+  };
 }
 
 async function main() {
@@ -308,6 +378,7 @@ async function main() {
   page.setDefaultTimeout(30000);
   await page.setViewport({ width: 1400, height: 900 });
   const movimentos = [];
+  const dadosGerais = [];
   try {
     await login(page);
     const abriu = await abrirListaAtivos(page);
@@ -316,9 +387,16 @@ async function main() {
     console.log('Processos encontrados:', daLista.length);
     for (const processo of daLista) {
       try {
-        const movs = await lerMovimentos(page, processo);
-        movimentos.push(...movs);
-        console.log(processo.numero, '→', movs.length, 'movimentos');
+        const r = await lerDadosProcesso(page, processo);
+        movimentos.push(...r.movimentos);
+        dadosGerais.push(r.dadosGerais);
+        console.log(
+          processo.numero, '→', r.movimentos.length, 'movimentos',
+          '· classe:', r.dadosGerais.classeProcessual || '(vazio)',
+          '· assunto:', r.dadosGerais.assunto || '(vazio)',
+          '· juízo:', r.dadosGerais.juizo || '(vazio)',
+          '· partes:', r.dadosGerais.partes || '(vazio)'
+        );
       } catch (e) {
         console.error('Falhou em', processo.numero, ':', e.message);
       }
@@ -332,7 +410,7 @@ async function main() {
   const resp = await fetch(SITE_URL + '/api/robo-projudi', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ codigo: CODIGO_ESCRITORIO, segredo: ROBO_SEGREDO, movimentos })
+    body: JSON.stringify({ codigo: CODIGO_ESCRITORIO, segredo: ROBO_SEGREDO, movimentos, dadosGerais })
   });
   const json = await resp.json();
   console.log('Enviado:', movimentos.length, 'movimentos →', JSON.stringify(json));
