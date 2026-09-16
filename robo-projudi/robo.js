@@ -407,13 +407,23 @@ async function lerPartes(page) {
 async function lerMovimentos(page) {
   await clicarPorTexto(page, 'Movimentações');
   const r = await esperarEmAlgumFrame(page, () => {
-    const tabelas = Array.from(document.querySelectorAll('table'));
-    const tabela = tabelas.find(t => t.innerText.includes('Seq.') && t.innerText.includes('Evento'));
+    const candidatas = Array.from(document.querySelectorAll('table'))
+      .filter(t => t.innerText.includes('Seq.') && t.innerText.includes('Evento'));
+    // A grade de movimentações fica dentro de outras tabelas de layout, e todas
+    // elas "contêm" Seq./Evento. Pegar a primeira trazia a tabela de fora, junto
+    // com controles da tela (era daí que vinha "Realces" como se fosse um
+    // andamento). A tabela certa é a mais interna: a que não contém outra igual.
+    const tabela = candidatas.find(t => !candidatas.some(o => o !== t && t.contains(o)));
     if (!tabela) return false;
     const linhas = Array.from(tabela.querySelectorAll('tr')).map(tr => {
       const tds = Array.from(tr.querySelectorAll('td'));
       const idxData = tds.findIndex(td => /\d{2}\/\d{2}\/\d{4}/.test(td.innerText));
       if (idxData === -1) return null;
+      // Linha de movimentação tem o número de sequência logo antes da data
+      // (Arquivos | Seq. | Data | Evento | Movimentado Por). Exigir isso descarta
+      // barras de ferramentas e legendas que por acaso mostram alguma data.
+      const seq = idxData > 0 ? tds[idxData - 1].innerText.replace(/\s+/g, ' ').trim() : '';
+      if (!/^\d+$/.test(seq)) return null;
       const m = tds[idxData].innerText.match(/(\d{2})\/(\d{2})\/(\d{4})/);
       const eventoTd = tds[idxData + 1];
       const evento = eventoTd ? eventoTd.innerText.replace(/\s+/g, ' ').trim() : '';
