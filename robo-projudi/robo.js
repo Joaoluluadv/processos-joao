@@ -436,10 +436,37 @@ async function lerMovimentos(page) {
   return r ? r.resultado.slice(0, 10) : [];
 }
 
+// Lê a caixa "Pendências" (intimações aguardando cumprimento) da aba inicial
+// do processo. O Projudi já calculou ali a data final do prazo (dias úteis e
+// feriados já descontados) no formato
+// "Evento de DD/MM/AAAA - Prazo: DD/MM/AAAA à DD/MM/AAAA (N dias): descrição".
+// Usar essa data pronta é muito mais confiável do que adivinhar a partir do
+// texto livre de uma movimentação.
+function paraIso(dmy) {
+  const m = String(dmy || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
+}
+
+async function lerPendencias(page) {
+  const r = await emAlgumFrame(page, () => {
+    const texto = (document.body && document.body.innerText) || '';
+    if (!texto.includes('Pendências')) return false;
+    const re = /Evento de (\d{2}\/\d{2}\/\d{4})\s*-\s*Prazo:\s*(\d{2}\/\d{2}\/\d{4})\s*à\s*(\d{2}\/\d{2}\/\d{4})\s*\((\d+)\s*dias?\):\s*([^\n]+)/g;
+    const achados = [];
+    let m;
+    while ((m = re.exec(texto))) {
+      achados.push({ evento: m[1], inicio: m[2], fim: m[3], dias: m[4], descricao: m[5].trim() });
+    }
+    return achados.length ? achados : false;
+  });
+  return r ? r.resultado : [];
+}
+
 async function lerDadosProcesso(page, processo) {
   await page.goto(processo.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await dormir(1200);
   const gerais = await lerDadosGerais(page);
+  const pendencias = await lerPendencias(page);
   const partes = await lerPartes(page);
   const linhasMov = await lerMovimentos(page);
   // se mesmo esperando não veio movimento nenhum, registra o que a tela tinha,
@@ -463,6 +490,10 @@ async function lerDadosProcesso(page, processo) {
     movimentos: linhasMov.map(l => ({ numero: processo.numero, data: l.data, texto: l.texto })),
     diagnosticoMovimentos,
     dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes: partes.texto },
+    pendencias: pendencias.map(p => ({
+      numero: processo.numero, evento: p.evento, inicio: paraIso(p.inicio), fim: paraIso(p.fim),
+      dias: p.dias, descricao: p.descricao
+    })),
     diagnosticoPartes: { colsAtivo: partes.colsAtivo, colsPassivo: partes.colsPassivo },
     diagnosticoJuizo: gerais.diagnosticoJuizo || []
   };
@@ -477,6 +508,7 @@ async function main() {
   await page.setViewport({ width: 1400, height: 900 });
   const movimentos = [];
   const dadosGerais = [];
+  const pendencias = [];
   try {
     await login(page);
     const abriu = await abrirListaAtivos(page);
@@ -488,12 +520,14 @@ async function main() {
         const r = await lerDadosProcesso(page, processo);
         movimentos.push(...r.movimentos);
         dadosGerais.push(r.dadosGerais);
+        pendencias.push(...r.pendencias);
         console.log(
           processo.numero, '→', r.movimentos.length, 'movimentos',
           '· classe:', r.dadosGerais.classeProcessual || '(vazio)',
           '· assunto:', r.dadosGerais.assunto || '(vazio)',
           '· juízo:', r.dadosGerais.juizo || '(vazio)',
-          '· partes:', r.dadosGerais.partes || '(vazio)'
+          '· partes:', r.dadosGerais.partes || '(vazio)',
+          '· pendência:', r.pendencias.length ? r.pendencias[0].fim + ' (' + r.pendencias[0].dias + ' dias)' : '(nenhuma)'
         );
         // ainda sem achar o padrão certo do Juízo — loga pistas pra descobrir onde
         // esse dado fica nessa versão do Projudi
@@ -516,7 +550,7 @@ async function main() {
   const resp = await fetch(SITE_URL + '/api/robo-projudi', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ codigo: CODIGO_ESCRITORIO, segredo: ROBO_SEGREDO, movimentos, dadosGerais })
+    body: JSON.stringify({ codigo: CODIGO_ESCRITORIO, segredo: ROBO_SEGREDO, movimentos, dadosGerais, pendencias })
   });
   const json = await resp.json();
   console.log('Enviado:', movimentos.length, 'movimentos →', JSON.stringify(json));

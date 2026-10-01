@@ -7,12 +7,19 @@
 //
 // Rota: POST /api/robo-projudi
 // Body: { codigo, segredo, movimentos: [{ numero, data: 'AAAA-MM-DD', texto }],
-//         dadosGerais: [{ numero, classeProcessual, assunto, juizo, partes }] }
+//         dadosGerais: [{ numero, classeProcessual, assunto, juizo, partes }],
+//         pendencias: [{ numero, inicio, fim, dias, descricao, evento }] }
 //
 // dadosGerais é opcional — uma "foto" atual de cada processo (classe
 // processual detalhada, assunto, juízo, partes), sem histórico. O site usa
 // isso só pra preencher campos que ainda estão vazios, nunca para sobrescrever
 // algo que a pessoa já preencheu à mão.
+//
+// pendencias é opcional — a caixa "Pendências" do Projudi, que já traz a data
+// final do prazo calculada pelo próprio tribunal (dias úteis e feriados já
+// descontados). "fim" é 'AAAA-MM-DD'. Um processo que estava com pendência e
+// deixou de mandar uma nesta rodada teve o prazo cumprido (ou deixou de
+// existir) — a entrada antiga dele é apagada, não fica parada.
 //
 // Exige a mesma integração Vercel KV usada por /api/dados, e a variável de
 // ambiente ROBO_PROJUDI_SEGREDO (defina você mesmo, qualquer texto — é a senha
@@ -51,6 +58,7 @@ module.exports = async function handler(req, res) {
   const segredo = body && body.segredo;
   const movimentos = (body && body.movimentos) || [];
   const dadosGerais = (body && body.dadosGerais) || [];
+  const pendencias = (body && body.pendencias) || [];
   if (!codigo) { res.status(400).json({ erro: 'Informe { codigo }' }); return; }
   if (segredo !== SEGREDO) { res.status(401).json({ erro: 'Segredo inválido' }); return; }
   if (!Array.isArray(movimentos) || !movimentos.length) { res.status(400).json({ erro: 'Informe { movimentos: [...] }' }); return; }
@@ -107,6 +115,28 @@ module.exports = async function handler(req, res) {
         };
       });
       dados.roboDadosGerais = mapa;
+    }
+
+    // Igual a roboDadosGerais: só mexe se o robô mandou algo de verdade. Mas
+    // ao contrário dele, aqui é "foto" de verdade — processo visitado nesta
+    // rodada e sem pendência mandada teve a intimação dele cumprida (ou a
+    // pendência some por outro motivo), então a entrada antiga é removida em
+    // vez de ficar esquecida mostrando um prazo que já não existe mais.
+    if (Array.isArray(dadosGerais) && dadosGerais.length) {
+      const mapaPend = dados.roboPendenciasPrazo || {};
+      const comPendenciaAgora = {};
+      pendencias.forEach(p => { if (p && p.numero) comPendenciaAgora[p.numero] = true; });
+      dadosGerais.forEach(d => {
+        if (d && d.numero && !comPendenciaAgora[d.numero]) delete mapaPend[d.numero];
+      });
+      pendencias.forEach(p => {
+        if (!p || !p.numero || !p.fim) return;
+        mapaPend[p.numero] = {
+          numero: p.numero, inicio: p.inicio || '', fim: p.fim, dias: p.dias || '',
+          descricao: p.descricao || '', evento: p.evento || '', atualizadoEm: Date.now()
+        };
+      });
+      dados.roboPendenciasPrazo = mapaPend;
     }
 
     const atualizadoEm = Date.now();
