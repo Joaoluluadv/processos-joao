@@ -1,0 +1,32 @@
+name: Robô do EPROC
+
+on:
+  workflow_dispatch: {}
+  # Ainda sem agendamento automático (cron) — este robô só faz login e grava
+  # diagnóstico por enquanto. Depois que a leitura das intimações pendentes
+  # estiver implementada e testada, adicionamos um "schedule:" aqui, igual ao
+  # robô do Projudi (.github/workflows/robo-projudi.yml).
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Instalar dependências
+        working-directory: robo-eproc
+        run: npm install
+      - name: Rodar robô
+        working-directory: robo-eproc
+        env:
+          EPROC_URL: ${{ secrets.EPROC_URL }}
+          EPROC_USUARIO: ${{ secrets.EPROC_USUARIO }}
+          EPROC_SENHA: ${{ secrets.EPROC_SENHA }}
+          EPROC_TOTP_SEGREDO: ${{ secrets.EPROC_TOTP_SEGREDO }}
+          CODIGO_ESCRITORIO: ${{ secrets.CODIGO_ESCRITORIO }}
+          ROBO_SEGREDO: ${{ secrets.ROBO_SEGREDO }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+        run: node robo.js

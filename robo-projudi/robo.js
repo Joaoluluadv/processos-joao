@@ -15,59 +15,14 @@
 const puppeteer = require('puppeteer');
 const { authenticator } = require('otplib');
 const fetch = require('node-fetch');
+const { resolverSegredo } = require('../robo-comum/totp.js');
 
 const PROJUDI_URL = process.env.PROJUDI_URL || 'https://projudi.tjpr.jus.br/projudi/';
 const USUARIO = process.env.PROJUDI_USUARIO;
 const SENHA = process.env.PROJUDI_SENHA;
 
-// otplib/authenticator (compatível com Google Authenticator) espera o segredo
-// em base32. Algumas ferramentas de leitura de QR code mostram o segredo em
-// hexadecimal (os mesmos bytes, outra codificação) — se vier assim, converte
-// para base32 em vez de tentar usar hex direto, que geraria código sempre errado.
-function hexParaBase32(hex) {
-  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  const bytes = Buffer.from(hex, 'hex');
-  let bits = '';
-  for (const b of bytes) bits += b.toString(2).padStart(8, '0');
-  let saida = '';
-  for (let i = 0; i + 5 <= bits.length; i += 5) saida += alfabeto[parseInt(bits.slice(i, i + 5), 2)];
-  const resto = bits.length % 5;
-  if (resto) saida += alfabeto[parseInt(bits.slice(-resto).padEnd(5, '0'), 2)];
-  return saida;
-}
-
-// Segredos colados no GitHub às vezes vêm com espaço/quebra de linha extra
-// (ex.: copiado de um terminal), embutidos numa URI/trecho tipo "secret=XXXX"
-// (o prefixo "otpauth://totp/...?" pode não estar presente se o texto foi
-// cortado), ou num rótulo tipo "Chave secreta: XXXX XXXX" — tenta cada recorte
-// possível e usa o primeiro que realmente validar como base32 ou hex.
 const totpCru = String(process.env.PROJUDI_TOTP_SEGREDO || '').trim();
-const totpMatchSecret = totpCru.match(/secret=([^&\s]+)/i);
-const totpMatchRotulo = totpCru.match(/:\s*(.+)$/);
-const totpCandidatos = [
-  { origem: 'trecho "secret=..."', valor: totpMatchSecret && decodeURIComponent(totpMatchSecret[1]) },
-  { origem: 'trecho após "rótulo:"', valor: totpMatchRotulo && totpMatchRotulo[1] },
-  { origem: 'texto original', valor: totpCru }
-].filter(c => c.valor);
-
-function validarSegredo(bruto) {
-  if (/^[A-Z2-7]+=*$/.test(bruto)) return 'base32';
-  if (bruto.length % 2 === 0 && /^[0-9A-F]+$/.test(bruto)) return 'hex';
-  return null;
-}
-
-let totpBruto = '', totpTipo = null, totpOrigem = 'texto original';
-for (const c of totpCandidatos) {
-  const normalizado = c.valor.replace(/\s+/g, '').toUpperCase();
-  const tipo = validarSegredo(normalizado);
-  if (tipo) { totpBruto = normalizado; totpTipo = tipo; totpOrigem = c.origem; break; }
-}
-if (!totpTipo) totpBruto = (totpCandidatos[0] ? totpCandidatos[0].valor : totpCru).replace(/\s+/g, '').toUpperCase();
-
-const TOTP_SEGREDO = totpTipo === 'hex' ? hexParaBase32(totpBruto) : totpBruto;
-const TOTP_FORMATO = totpTipo
-  ? `${totpOrigem} + ${totpTipo === 'hex' ? 'hex (convertido p/ base32)' : 'base32'}`
-  : 'desconhecido — confira o segredo';
+const { segredo: TOTP_SEGREDO, formato: TOTP_FORMATO } = resolverSegredo(totpCru);
 
 const CODIGO_ESCRITORIO = process.env.CODIGO_ESCRITORIO;
 const ROBO_SEGREDO = process.env.ROBO_SEGREDO;
@@ -244,6 +199,12 @@ async function login(page) {
       const cands = ['#otp', '#totp', 'input[name="otp"]', 'input[autocomplete="one-time-code"]'];
       return cands.find(s => document.querySelector(s)) || null;
     });
+    // Diagnóstico temporário: TOTP depende do relógio bater com o do servidor
+    // (janela de 30s) — se o runner do GitHub Actions estiver com a hora
+    // errada, o código gerado aqui é sempre rejeitado mesmo com o segredo
+    // certo. Loga o horário local no momento exato de gerar o código, pra
+    // comparar com o horário real.
+    console.log('Gerando código TOTP às', new Date().toISOString(), '(epoch', Date.now(), ', janela de 30s nº', Math.floor(Date.now() / 30000), ')');
     await fOtp.type(sel, authenticator.generate(TOTP_SEGREDO), { delay: 20 });
     const btn = await fOtp.evaluate(() => {
       const b = document.querySelector('#kc-login') || document.querySelector('input[type="submit"]') || document.querySelector('button[type="submit"]');
@@ -436,10 +397,37 @@ async function lerMovimentos(page) {
   return r ? r.resultado.slice(0, 10) : [];
 }
 
+// Lê a caixa "Pendências" (intimações aguardando cumprimento) da aba inicial
+// do processo. O Projudi já calculou ali a data final do prazo (dias úteis e
+// feriados já descontados) no formato
+// "Evento de DD/MM/AAAA - Prazo: DD/MM/AAAA à DD/MM/AAAA (N dias): descrição".
+// Usar essa data pronta é muito mais confiável do que adivinhar a partir do
+// texto livre de uma movimentação.
+function paraIso(dmy) {
+  const m = String(dmy || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
+}
+
+async function lerPendencias(page) {
+  const r = await emAlgumFrame(page, () => {
+    const texto = (document.body && document.body.innerText) || '';
+    if (!texto.includes('Pendências')) return false;
+    const re = /Evento de (\d{2}\/\d{2}\/\d{4})\s*-\s*Prazo:\s*(\d{2}\/\d{2}\/\d{4})\s*à\s*(\d{2}\/\d{2}\/\d{4})\s*\((\d+)\s*dias?\):\s*([^\n]+)/g;
+    const achados = [];
+    let m;
+    while ((m = re.exec(texto))) {
+      achados.push({ evento: m[1], inicio: m[2], fim: m[3], dias: m[4], descricao: m[5].trim() });
+    }
+    return achados.length ? achados : false;
+  });
+  return r ? r.resultado : [];
+}
+
 async function lerDadosProcesso(page, processo) {
   await page.goto(processo.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await dormir(1200);
   const gerais = await lerDadosGerais(page);
+  const pendencias = await lerPendencias(page);
   const partes = await lerPartes(page);
   const linhasMov = await lerMovimentos(page);
   // se mesmo esperando não veio movimento nenhum, registra o que a tela tinha,
@@ -463,6 +451,10 @@ async function lerDadosProcesso(page, processo) {
     movimentos: linhasMov.map(l => ({ numero: processo.numero, data: l.data, texto: l.texto })),
     diagnosticoMovimentos,
     dadosGerais: { numero: processo.numero, classeProcessual: gerais.classeProcessual, assunto: gerais.assunto, juizo: gerais.juizo, partes: partes.texto },
+    pendencias: pendencias.map(p => ({
+      numero: processo.numero, evento: p.evento, inicio: paraIso(p.inicio), fim: paraIso(p.fim),
+      dias: p.dias, descricao: p.descricao
+    })),
     diagnosticoPartes: { colsAtivo: partes.colsAtivo, colsPassivo: partes.colsPassivo },
     diagnosticoJuizo: gerais.diagnosticoJuizo || []
   };
@@ -477,6 +469,7 @@ async function main() {
   await page.setViewport({ width: 1400, height: 900 });
   const movimentos = [];
   const dadosGerais = [];
+  const pendencias = [];
   try {
     await login(page);
     const abriu = await abrirListaAtivos(page);
@@ -488,12 +481,14 @@ async function main() {
         const r = await lerDadosProcesso(page, processo);
         movimentos.push(...r.movimentos);
         dadosGerais.push(r.dadosGerais);
+        pendencias.push(...r.pendencias);
         console.log(
           processo.numero, '→', r.movimentos.length, 'movimentos',
           '· classe:', r.dadosGerais.classeProcessual || '(vazio)',
           '· assunto:', r.dadosGerais.assunto || '(vazio)',
           '· juízo:', r.dadosGerais.juizo || '(vazio)',
-          '· partes:', r.dadosGerais.partes || '(vazio)'
+          '· partes:', r.dadosGerais.partes || '(vazio)',
+          '· pendência:', r.pendencias.length ? r.pendencias[0].fim + ' (' + r.pendencias[0].dias + ' dias)' : '(nenhuma)'
         );
         // ainda sem achar o padrão certo do Juízo — loga pistas pra descobrir onde
         // esse dado fica nessa versão do Projudi
@@ -516,7 +511,7 @@ async function main() {
   const resp = await fetch(SITE_URL + '/api/robo-projudi', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ codigo: CODIGO_ESCRITORIO, segredo: ROBO_SEGREDO, movimentos, dadosGerais })
+    body: JSON.stringify({ codigo: CODIGO_ESCRITORIO, segredo: ROBO_SEGREDO, movimentos, dadosGerais, pendencias })
   });
   const json = await resp.json();
   console.log('Enviado:', movimentos.length, 'movimentos →', JSON.stringify(json));
