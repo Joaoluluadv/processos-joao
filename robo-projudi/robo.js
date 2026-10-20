@@ -199,6 +199,12 @@ async function login(page) {
       const cands = ['#otp', '#totp', 'input[name="otp"]', 'input[autocomplete="one-time-code"]'];
       return cands.find(s => document.querySelector(s)) || null;
     });
+    // Diagnóstico temporário: TOTP depende do relógio bater com o do servidor
+    // (janela de 30s) — se o runner do GitHub Actions estiver com a hora
+    // errada, o código gerado aqui é sempre rejeitado mesmo com o segredo
+    // certo. Loga o horário local no momento exato de gerar o código, pra
+    // comparar com o horário real.
+    console.log('Gerando código TOTP às', new Date().toISOString(), '(epoch', Date.now(), ', janela de 30s nº', Math.floor(Date.now() / 30000), ')');
     await fOtp.type(sel, authenticator.generate(TOTP_SEGREDO), { delay: 20 });
     const btn = await fOtp.evaluate(() => {
       const b = document.querySelector('#kc-login') || document.querySelector('input[type="submit"]') || document.querySelector('button[type="submit"]');
